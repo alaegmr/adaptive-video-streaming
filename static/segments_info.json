@@ -1,0 +1,51 @@
+{
+    "abr_rules": [
+        {
+            "resolution": "360p",
+            "min_kbps": 0,
+            "max_kbps": 800
+        },
+        {
+            "resolution": "480p",
+            "min_kbps": 800,
+            "max_kbps": 1500
+        },
+        {
+            "resolution": "720p",
+            "min_kbps": 1500,
+            "max_kbps": 3500
+        },
+        {
+            "resolution": "1080p",
+            "min_kbps": 3500,
+            "max_kbps": 8000
+        },
+        {
+            "resolution": "4k",
+            "min_kbps": 8000,
+            "max_kbps": 999999
+        }
+    ],
+    "segments": [
+        {
+            "name": "segment_1.mp4",
+            "versions": {
+                "360p": "static/segments_resized/segment_1_360p.mp4",
+                "480p": "static/segments_resized/segment_1_480p.mp4",
+                "720p": "static/segments_resized/segment_1_720p.mp4",
+                "1080p": "static/segments_resized/segment_1_1080p.mp4",
+                "4k": "static/segments_resized/segment_1_4k.mp4"
+            }
+        },
+        {
+            "name": "segment_2.mp4",
+            "versions": {
+                "360p": "static/segments_resized/segment_2_360p.mp4",
+                "480p": "static/segments_resized/segment_2_480p.mp4",
+                "720p": "static/segments_resized/segment_2_720p.mp4",
+                "1080p": "static/segments_resized/segment_2_1080p.mp4",
+                "4k": "static/segments_resized/segment_2_4k.mp4"
+            }
+        }
+    ]
+}

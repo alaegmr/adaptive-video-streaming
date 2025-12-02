@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Video Player</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+    --primary: #6366f1;
+    --primary-hover: #4f46e5;
+    --accent: #00ffc6;
+    --error: #ef4444;
+    --dark-bg: #0f172a;
+    --light-text: #f8fafc;
+    --gray-text: #64748b;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+    font-family: 'Inter', sans-serif;
+    background: var(--dark-bg);
+    color: var(--light-text);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 30px 20px;
+    min-height: 100vh;
+}
+
+h1 {
+    font-size:2.2rem;
+    font-weight:600;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6, #f43f5e);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 15px;
+    text-align:center;
+}
+
+video {
+    width:80%;
+    border-radius:16px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    background:#000;
+    margin-bottom:20px;
+}
+
+#info, #bufferInfo, #errorABR {
+    width:80%;
+    text-align:center;
+    padding:10px 15px;
+    border-radius:12px;
+    margin-bottom:10px;
+}
+
+#info {
+    background: rgba(99,102,241,0.1);
+    color: var(--accent);
+}
+
+#errorABR {
+    background: rgba(244,63,94,0.1);
+    color: var(--error);
+    font-weight:bold;
+    display:none;
+}
+
+#bufferInfo {
+    background: rgba(31,50,76,0.2);
+    color: var(--gray-text);
+}
+
+#thumbnails {
+    margin-top:25px;
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    justify-content:center;
+}
+
+.thumbnail {
+    width:140px;
+    height:80px;
+    border:2px solid rgba(99,102,241,0.3);
+    border-radius:12px;
+    object-fit:cover;
+    cursor:pointer;
+    transition: 0.2s;
+}
+
+.thumbnail:hover {
+    transform: scale(1.05);
+    border-color: var(--primary);
+    box-shadow:0 0 15px rgba(99,102,241,0.5);
+}
+</style>
+</head>
+<body>
+
+<h1>StreamFlow Pro</h1>
+
+<video id="player" controls></video>
+
+<div id="info">Chargement des segments...</div>
+<div id="errorABR">⚠️ Segment perdu</div>
+<div id="bufferInfo">Buffer: 0 segments</div>
+
+<div id="thumbnails"></div>
+
+<script>
+// === TON CODE JS EXACTEMENT COMME TU L'AS DONNÉ ===
+const player = document.getElementById("player");
+const info = document.getElementById("info");
+const errorABR = document.getElementById("errorABR");
+
+const BUFFER_SIZE = 4;
+const CHECK_INTERVAL = 5000;
+
+let segments = [];
+let currentResolution = null;
+let bufferSegments = [];
+let currentSegmentIndex = 0;
+let wasOffline = false;
+let pausedTime = 0;
+
+// -------------------- BANDE PASSANTE --------------------
+async function getBandwidth() {
+    try {
+        const start = performance.now();
+        const resp = await fetch("/static/testfile_1MB.bin",{cache:"no-store"});
+        if(!resp.ok) throw new Error("Impossible de récupérer le fichier test");
+        const blob = await resp.blob();
+        const duration = (performance.now()-start)/1000;
+        return (blob.size*8)/1000/duration; 
+    } catch {
+        return 0;
+    }
+}
+
+// -------------------- ABR SERVER --------------------
+async function getABRSegments() {
+    try {
+        const bandwidth = await getBandwidth();
+        const resp = await fetch("/abr", {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({bandwidth})
+        });
+
+        if(!resp.ok) throw new Error("Erreur ABR serveur");
+        const data = await resp.json();
+        return {...data, bandwidth};
+    } catch {
+        errorABR.style.display="block";
+        errorABR.innerText="⚠️ Erreur ABR";
+        return null;
+    }
+}
+
+// -------------------- PRELOAD BUFFER --------------------
+function updateBufferInfo() {
+    const bufferDiv = document.getElementById("bufferInfo");
+    bufferDiv.innerText =
+        `Buffer: ${bufferSegments.length} segments (de ${currentSegmentIndex+1} à ${currentSegmentIndex + bufferSegments.length})`;
+}
+
+function preloadBuffer() {
+    bufferSegments = [];
+    for (let i = 0; i < BUFFER_SIZE; i++) {
+        let idx = currentSegmentIndex + i;
+        if (idx >= segments.length) idx = segments.length - 1;
+        bufferSegments.push(segments[idx]);
+    }
+    updateBufferInfo();
+}
+
+// -------------------- LECTURE SEGMENT --------------------
+function playCurrentSegment() {
+    if (!bufferSegments.length) return;
+    const src = typeof bufferSegments[0] === "string" ? bufferSegments[0] : bufferSegments[0][currentResolution];
+    player.src = src;
+    player.play();
+    info.innerText = `Segment ${currentSegmentIndex+1}/${segments.length} — ${currentResolution}`;
+}
+
+// -------------------- GENERATION MINIATURE --------------------
+function generateThumbnailFromVideo(src) {
+    return new Promise(resolve => {
+        const video = document.createElement("video");
+        video.src = src;
+        video.crossOrigin = "anonymous";
+        video.muted = true;
+        video.preload = "metadata";
+
+        let resolved = false;
+
+        function finish(canvasData) {
+            if (!resolved) {
+                resolved = true;
+                resolve(canvasData);
+            }
+        }
+
+        video.addEventListener("loadeddata", () => {
+            video.currentTime = Math.min(0.1, video.duration/10);
+        });
+
+        video.addEventListener("seeked", () => {
+            try {
+                const canvas = document.createElement("canvas");
+                canvas.width = 200;
+                canvas.height = 110;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                finish(canvas.toDataURL("image/jpeg"));
+            } catch {
+                finish(null);
+            }
+        });
+
+        setTimeout(() => {
+            try {
+                const canvas = document.createElement("canvas");
+                canvas.width = 200;
+                canvas.height = 110;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                finish(canvas.toDataURL("image/jpeg"));
+            } catch {
+                finish(null);
+            }
+        }, 1000);
+
+        video.addEventListener("error", () => finish(null));
+    });
+}
+
+async function generateThumbnails() {
+    const container = document.getElementById("thumbnails");
+    container.innerHTML = "";
+
+    const thumbPromises = segments.map(async seg => {
+        const segSrc = typeof seg === "string" ? seg : seg[currentResolution];
+        try {
+            return await generateThumbnailFromVideo(segSrc);
+        } catch {
+            return null;
+        }
+    });
+
+    const thumbs = await Promise.all(thumbPromises);
+
+    thumbs.forEach((thumb, i) => {
+        const seg = segments[i];
+        const segSrc = typeof seg === "string" ? seg : seg[currentResolution];
+
+        const img = document.createElement("img");
+        img.className = "thumbnail";
+        img.src = thumb || segSrc;
+
+        img.addEventListener("click", () => {
+            currentSegmentIndex = i;
+            preloadBuffer();
+            player.src = segSrc;
+            player.play();
+            info.innerText = `Segment ${i+1}/${segments.length} — ${currentResolution}`;
+        });
+
+        container.appendChild(img);
+    });
+}
+
+// -------------------- FIN DE SEGMENT --------------------
+player.addEventListener("ended", async ()=>{
+    currentSegmentIndex++;
+    if (currentSegmentIndex >= segments.length) {
+        info.innerText = "✅ Lecture terminée.";
+        return;
+    }
+
+    preloadBuffer();
+
+    try {
+        const nextSegment = bufferSegments[0];
+        const res = await fetch(typeof nextSegment === "string" ? nextSegment : nextSegment[currentResolution], {method:"HEAD"});
+        if(!res.ok) throw new Error("Segment manquant");
+        errorABR.style.display="none";
+    } catch {
+        errorABR.style.display="block";
+        errorABR.innerText="⚠️ Segment perdu";
+    }
+
+    playCurrentSegment();
+});
+
+// -------------------- ABR DYNAMIQUE --------------------
+async function startABR() {
+    const data = await getABRSegments();
+    if (!data || !data.segments) return;
+
+    segments = data.segments;
+    currentResolution = data.resolution;
+
+    info.innerText = `Résolution initiale: ${currentResolution} — Bande passante: ${Math.round(data.bandwidth)} kbps`;
+
+    await generateThumbnails();
+    preloadBuffer();
+    playCurrentSegment();
+
+    setInterval(async ()=>{
+        const data = await getABRSegments();
+        if(!data) return;
+
+        if(data.resolution !== currentResolution){
+            currentResolution = data.resolution;
+            segments = data.segments;
+            await generateThumbnails();
+            preloadBuffer();
+            info.innerText = `Résolution adaptée: ${currentResolution} — Bande passante: ${Math.round(data.bandwidth)} kbps`;
+        }
+    }, CHECK_INTERVAL);
+}
+
+// -------------------- OFFLINE --------------------
+function checkBuffer() {
+    if (!wasOffline) return;
+
+    const buffered = player.buffered;
+    const currentTime = player.currentTime;
+
+    let bufferEnd = 0;
+    for (let i = 0; i < buffered.length; i++) {
+        if (currentTime >= buffered.start(i) && currentTime <= buffered.end(i)) {
+            bufferEnd = buffered.end(i);
+            break;
+        }
+    }
+
+    if (currentTime >= bufferEnd) {
+        player.pause();
+        pausedTime = currentTime;
+    }
+}
+
+setInterval(checkBuffer, 500);
+
+window.addEventListener("offline", ()=>{
+    wasOffline = true;
+    pausedTime = player.currentTime;
+    errorABR.style.display="block";
+    errorABR.innerText="⚠️ Connexion perdue";
+    checkBuffer();
+});
+
+window.addEventListener("online", async ()=>{
+    wasOffline = false;
+    errorABR.style.display="none";
+    const currentSrc = typeof segments[currentSegmentIndex] === "string" ? segments[currentSegmentIndex] : segments[currentSegmentIndex][currentResolution];
+    player.src = currentSrc;
+    player.currentTime = pausedTime;
+    await player.play();
+});
+
+// LANCEMENT
+startABR();
+</script>
+
+</body>
+</html>

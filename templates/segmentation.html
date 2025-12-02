@@ -1,0 +1,231 @@
+  <!DOCTYPE html>
+  <html lang="fr">
+
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Segmentation vidéo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --primary: #6366f1;
+        --primary-hover: #4f46e5;
+        --accent: #00ffc6;
+        --error: #ef4444;
+        --dark-bg: #0f172a;
+        --light-text: #f8fafc;
+        --gray-text: #64748b;
+      }
+
+      * { margin:0; padding:0; box-sizing:border-box; }
+
+      body {
+        font-family: 'Inter', sans-serif;
+        background: linear-gradient(135deg, #141E30, #243B55);
+        color: var(--light-text);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 30px 20px;
+        min-height: 100vh;
+      }
+
+      h1 {
+        font-size: 2.2rem;
+        font-weight:600;
+        background: linear-gradient(135deg, var(--primary), #8b5cf6, #f43f5e);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 25px;
+        text-align:center;
+      }
+
+      .form-box {
+        margin-top: 20px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 20px;
+        padding: 30px 35px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 15px;
+        max-width: 400px;
+        width: 90%;
+      }
+
+      input,
+      button {
+        border: none;
+        border-radius: 25px;
+        padding: 12px 20px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: 0.3s;
+      }
+
+      input[type="file"] {
+        background: linear-gradient(135deg, var(--accent), #00b8ff);
+        color: #0b0b0b;
+        width: 100%;
+      }
+
+      input[type="number"] {
+        width: 80%;
+        text-align: center;
+        border: 2px solid var(--accent);
+        background: rgba(255,255,255,0.05);
+        color: var(--light-text);
+      }
+
+      input:focus,
+      button:focus {
+        outline: none;
+        box-shadow: 0 0 8px var(--accent);
+      }
+
+      button {
+        background: linear-gradient(135deg, var(--accent), #00b8ff);
+        color: #0b0b0b;
+        font-weight: 700;
+      }
+
+      button:hover {
+        background: linear-gradient(135deg, #00b8ff, var(--accent));
+      }
+
+      .progress {
+        margin-top: 20px;
+        width: 100%;
+        height: 12px;
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .bar {
+        width: 0%;
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.3s;
+      }
+
+      #statusMsg {
+        font-size: 0.95rem;
+        margin-top: 10px;
+        color: var(--accent);
+        text-align:center;
+      }
+
+      footer {
+        margin-top: 50px;
+        font-size: 14px;
+        color: #888;
+        text-align: center;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        width: 100%;
+        padding: 15px;
+      }
+
+      footer span {
+        color: var(--accent);
+        font-weight: bold;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <h1>Segmentation de la vidéo</h1>
+
+    <div class="form-box">
+      <input type="file" id="videoFile" accept="video/*">
+      <input type="number" id="duration" placeholder="Durée (en secondes)" min="1" value="10">
+      <button id="startBtn">Démarrer la segmentation</button>
+
+      <div class="progress">
+        <div class="bar" id="bar"></div>
+      </div>
+
+      <p id="statusMsg"></p>
+    </div>
+
+    <footer><span>Imene</span> - <span>Alae</span></footer>
+
+    <script>
+      // === TON JS EXACTEMENT COMME TU L'AS DONNÉ ===
+      const videoFile = document.getElementById("videoFile");
+      const durationInput = document.getElementById("duration");
+      const startBtn = document.getElementById("startBtn");
+      const statusMsg = document.getElementById("statusMsg");
+      const bar = document.getElementById("bar");
+
+      async function checkProgress() {
+        try {
+          const res = await fetch("/segments_info");
+          const data = await res.json();
+
+          if (!data.ready) return 0;
+
+          const segments = data.segments.filter(Boolean);
+          const total = data.segments.length;
+          const done = segments.length;
+
+          return (done / total) * 100;
+
+        } catch {
+          return 0;
+        }
+      }
+
+      startBtn.addEventListener("click", async () => {
+        const file = videoFile.files[0];
+        const duration = durationInput.value;
+
+        if (!file) return alert("⚠️ Veuillez sélectionner une vidéo !");
+
+        const formData = new FormData();
+        formData.append("video", file);
+        formData.append("duration", duration);
+
+        statusMsg.textContent = "⏳ Segmentation en cours...";
+        bar.style.width = "10%";
+
+        try {
+          const res = await fetch("/segment", {
+            method: "POST",
+            body: formData
+          });
+
+          const data = await res.json();
+
+          if (!data.success) {
+            statusMsg.textContent = "❌ Erreur : " + (data.error || "Inconnue");
+            return;
+          }
+
+          let progress = 10;
+
+          const interval = setInterval(async () => {
+            progress = await checkProgress();
+            bar.style.width = progress + "%";
+
+            if (progress >= 100) {
+              clearInterval(interval);
+              statusMsg.textContent = "✅ Segmentation terminée ! Redirection...";
+
+              setTimeout(() => (window.location.href = "/player"), 1500);
+            }
+
+          }, 2000);
+
+        } catch (err) {
+          statusMsg.textContent = "❌ Erreur réseau.";
+          console.error(err);
+        }
+      });
+    </script>
+
+  </body>
+  </html>
